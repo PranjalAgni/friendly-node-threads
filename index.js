@@ -1,5 +1,5 @@
 const os = require('os');
-const { Worker, parentPort, workerData } = require('worker_threads');
+const { Worker } = require('worker_threads');
 const inquirer = require('inquirer');
 const ora = require('ora');
 const path = require('path');
@@ -10,44 +10,48 @@ const workerPath = path.resolve('factorial-worker.js');
 const getFactorialWithWorker = (number) => {
   if (number === 0) return 1;
   const numbers = [];
-  for (let i = 1; i <= number; i++) {
+  for (let i = 1n; i <= number; i++) {
     numbers.push(i);
   }
 
   const segmentSize = Math.ceil(numbers.length / numCpu);
   const segments = [];
-  let completed = 0;
-  let fact = 1;
   for (let segmentIdx = 0; segmentIdx < numCpu; segmentIdx++) {
     const start = segmentIdx * segmentSize;
     const end = start + segmentSize;
     const segment = numbers.slice(start, end);
     segments.push(segment);
-    const worker = new Worker(workerPath, {
-      workerData: {
-        segment,
-      },
-    });
-
-    worker.once('message', (done) => {
-      completed += 1;
-      console.log('Done: ', done);
-      fact *= done;
-      if (completed === numCpu) {
-        console.log('Factorial calculated: ', fact);
-        return fact;
-      }
-    });
   }
+
+  const promises = segments.map((segment) => {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(workerPath, {
+        workerData: {
+          segment,
+        },
+      });
+
+      worker.on('message', resolve);
+      worker.on('error', reject);
+      worker.on('exit', (code) => {
+        if (code !== 0)
+          reject(new Error(`Worker stopped with exit code ${code}`));
+      });
+    });
+  });
+
+  return Promise.all(promises).then((results) => {
+    return results.reduce((acc, val) => acc * val, 1n);
+  });
 };
 
 const getFactorial = (number) => {
   const numbers = [];
-  for (let i = 1; i <= number; i++) {
+  for (let i = 1n; i <= number; i++) {
     numbers.push(i);
   }
 
-  return numbers.reduce((acc, val) => acc * val, 1);
+  return numbers.reduce((acc, val) => acc * val, 1n);
 };
 
 const benchMarkFactorial = async (number, factFn, label) => {
@@ -82,9 +86,7 @@ const main = async () => {
   const timeLocal = await benchMarkFactorial(number, getFactorial, 'Local');
 
   const diff = timeLocal - timeWorker;
-  console.log(
-    `Difference between local and worker: ${diff / BigInt(1000000)}ms`
-  );
+  console.log(`Difference between local and worker: ${diff / BigInt(1e6)}ms`);
 };
 
 main();
